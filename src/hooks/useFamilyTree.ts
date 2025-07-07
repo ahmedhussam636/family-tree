@@ -1,18 +1,59 @@
 import { useState, useCallback } from 'react';
+import { useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { FamilyMember, FamilyTree } from '../types/FamilyTree';
 
+const STORAGE_KEY = 'family-tree-data';
+
+const loadFromStorage = (): FamilyTree | null => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (error) {
+    console.error('Error loading from localStorage:', error);
+  }
+  return null;
+};
+
+const saveToStorage = (data: FamilyTree) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch (error) {
+    console.error('Error saving to localStorage:', error);
+  }
+};
+
 export const useFamilyTree = () => {
-  const [familyTree, setFamilyTree] = useState<FamilyTree>({
-    id: uuidv4(),
-    name: 'شجرة عائلتي',
-    members: [],
-    rootMemberId: '',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+  const [familyTree, setFamilyTree] = useState<FamilyTree>(() => {
+    const stored = loadFromStorage();
+    return stored || {
+      id: uuidv4(),
+      name: 'شجرة عائلتي',
+      members: [],
+      rootMemberId: '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
   });
 
   const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
+
+  // حفظ البيانات في localStorage عند كل تغيير
+  useEffect(() => {
+    saveToStorage(familyTree);
+  }, [familyTree]);
+
+  const updateFamilyTree = useCallback((updater: (prev: FamilyTree) => FamilyTree) => {
+    setFamilyTree(prev => {
+      const updated = updater(prev);
+      return {
+        ...updated,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  }, []);
 
   const addMember = useCallback((member: Omit<FamilyMember, 'id' | 'children'>) => {
     const newMember: FamilyMember = {
@@ -21,11 +62,10 @@ export const useFamilyTree = () => {
       children: [],
     };
 
-    setFamilyTree(prev => {
+    updateFamilyTree(prev => {
       const updated = {
         ...prev,
         members: [...prev.members, newMember],
-        updatedAt: new Date().toISOString(),
       };
 
       // If this is the first member, make it the root
@@ -46,20 +86,19 @@ export const useFamilyTree = () => {
     });
 
     return newMember.id;
-  }, []);
+  }, [updateFamilyTree]);
 
   const updateMember = useCallback((id: string, updates: Partial<FamilyMember>) => {
-    setFamilyTree(prev => ({
+    updateFamilyTree(prev => ({
       ...prev,
       members: prev.members.map(member => 
         member.id === id ? { ...member, ...updates } : member
       ),
-      updatedAt: new Date().toISOString(),
     }));
-  }, []);
+  }, [updateFamilyTree]);
 
   const deleteMember = useCallback((id: string) => {
-    setFamilyTree(prev => {
+    updateFamilyTree(prev => {
       const memberToDelete = prev.members.find(m => m.id === id);
       if (!memberToDelete) return prev;
 
@@ -105,14 +144,13 @@ export const useFamilyTree = () => {
         ...prev,
         members: updatedMembers,
         rootMemberId: newRootId,
-        updatedAt: new Date().toISOString(),
       };
     });
 
     if (selectedMember?.id === id) {
       setSelectedMember(null);
     }
-  }, [selectedMember]);
+  }, [selectedMember, updateFamilyTree]);
 
   const addSpouse = useCallback((memberId: string, spouseData: Omit<FamilyMember, 'id' | 'children'>) => {
     const spouseId = uuidv4();
@@ -123,7 +161,7 @@ export const useFamilyTree = () => {
       relationship: spouseData.gender === 'male' ? 'husband' : 'wife',
     };
 
-    setFamilyTree(prev => {
+    updateFamilyTree(prev => {
       const updatedMembers = [...prev.members, spouse];
       
       // Link the spouse relationship
@@ -147,11 +185,24 @@ export const useFamilyTree = () => {
       return {
         ...prev,
         members: updatedMembers,
-        updatedAt: new Date().toISOString(),
       };
     });
 
     return spouseId;
+  }, [updateFamilyTree]);
+
+  const clearData = useCallback(() => {
+    const newTree: FamilyTree = {
+      id: uuidv4(),
+      name: 'شجرة عائلتي',
+      members: [],
+      rootMemberId: '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setFamilyTree(newTree);
+    setSelectedMember(null);
+    localStorage.removeItem(STORAGE_KEY);
   }, []);
 
   const getMemberById = useCallback((id: string) => {
@@ -176,6 +227,7 @@ export const useFamilyTree = () => {
       const imported = JSON.parse(jsonData) as FamilyTree;
       setFamilyTree(imported);
       setSelectedMember(null);
+      saveToStorage(imported);
       return true;
     } catch (error) {
       console.error('Error importing data:', error);
@@ -196,5 +248,6 @@ export const useFamilyTree = () => {
     getParent,
     exportData,
     importData,
+    clearData,
   };
 };

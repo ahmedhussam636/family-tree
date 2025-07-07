@@ -6,6 +6,7 @@ interface SidebarProps {
   members: FamilyMember[];
   selectedMember: FamilyMember | null;
   onSelectMember: (member: FamilyMember) => void;
+  isPresentationMode?: boolean;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({

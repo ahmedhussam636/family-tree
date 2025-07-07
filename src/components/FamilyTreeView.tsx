@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { ZoomIn, ZoomOut, RotateCcw, Plus, Presentation, Grid3X3, ChevronLeft, Home } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCcw, Plus, Presentation, Grid3X3, ChevronLeft, Home, Move } from 'lucide-react';
 import { FamilyMember } from '../types/FamilyTree';
 import FamilyNode from './FamilyNode';
 
@@ -29,8 +29,10 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
   const [zoom, setZoom] = useState(1);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
   const [presentationPath, setPresentationPath] = useState<string[]>([]);
-  const [animatingChildren, setAnimatingChildren] = useState<string[]>([]);
-  const [showingChildren, setShowingChildren] = useState<string[]>([]);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [showGrid, setShowGrid] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const handleZoomIn = () => {
@@ -43,6 +45,7 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
 
   const handleResetZoom = () => {
     setZoom(1);
+    setPanOffset({ x: 0, y: 0 });
     if (containerRef.current) {
       containerRef.current.scrollTo({
         left: containerRef.current.scrollWidth / 2 - containerRef.current.clientWidth / 2,
@@ -52,17 +55,46 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
     }
   };
 
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button === 0) { // Left mouse button
+      setIsDragging(true);
+      setDragStart({
+        x: e.clientX - panOffset.x,
+        y: e.clientY - panOffset.y
+      });
+      e.preventDefault();
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (isDragging) {
+      setPanOffset({
+        x: e.clientX - dragStart.x,
+        y: e.clientY - dragStart.y
+      });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    setZoom(prev => Math.max(0.3, Math.min(3, prev + delta)));
+  };
+
+  const toggleGrid = () => {
+    setShowGrid(!showGrid);
+  };
   const togglePresentationMode = () => {
     if (!isPresentationMode) {
       // بدء وضع العرض التقديمي من الجد الأكبر
       setPresentationPath([rootMemberId]);
-      setAnimatingChildren([]);
-      setShowingChildren([]);
     } else {
       // إنهاء وضع العرض التقديمي
       setPresentationPath([]);
-      setAnimatingChildren([]);
-      setShowingChildren([]);
     }
     setIsPresentationMode(!isPresentationMode);
   };
@@ -73,34 +105,19 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
       return;
     }
 
-    // في وضع العرض التقديمي
+    // في وضع العرض التقديمي - منع تكرار الكارد
+    const memberIndex = presentationPath.indexOf(member.id);
+    if (memberIndex !== -1) {
+      // إذا كان العضو موجود في المسار، قطع المسار عند هذا العضو
+      setPresentationPath(presentationPath.slice(0, memberIndex + 1));
+      return;
+    }
+
     const children = members.filter(m => m.parentId === member.id);
     
     if (children.length > 0) {
-      // إذا كان العضو في المسار الحالي، انتقل إليه
-      const memberIndex = presentationPath.indexOf(member.id);
-      if (memberIndex !== -1) {
-        // قطع المسار عند هذا العضو
-        setPresentationPath(presentationPath.slice(0, memberIndex + 1));
-        setAnimatingChildren([]);
-        setShowingChildren([]);
-      } else {
-        // أضف العضو للمسار
-        setPresentationPath(prev => [...prev, member.id]);
-        
-        // إظهار الأطفال فوراً
-        setShowingChildren(children.map(child => child.id));
-        
-        // تشغيل الأنيميشن للأطفال بتأخير متدرج
-        setTimeout(() => {
-          setAnimatingChildren(children.map(child => child.id));
-        }, 100);
-        
-        // إزالة الأنيميشن بعد انتهائه
-        setTimeout(() => {
-          setAnimatingChildren([]);
-        }, 1500);
-      }
+      // أضف العضو للمسار
+      setPresentationPath(prev => [...prev, member.id]);
     } else {
       // إذا لم يكن له أطفال، اختره فقط
       onSelectMember(member);
@@ -110,15 +127,11 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
   const goBackInPresentation = () => {
     if (presentationPath.length > 1) {
       setPresentationPath(prev => prev.slice(0, -1));
-      setAnimatingChildren([]);
-      setShowingChildren([]);
     }
   };
 
   const goToRootInPresentation = () => {
     setPresentationPath([rootMemberId]);
-    setAnimatingChildren([]);
-    setShowingChildren([]);
   };
 
   const buildTree = (memberId: string, level: number = 0): React.ReactNode => {
@@ -129,9 +142,9 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
     const spouse = member.spouseId ? members.find(m => m.id === member.spouseId) : null;
 
     return (
-      <div key={member.id} className="flex flex-col items-center relative">
+      <div key={member.id} className="flex flex-col items-center relative mb-8 sm:mb-12">
         {/* مستوى الوالدين */}
-        <div className="flex items-center justify-center mb-4 sm:mb-8 relative z-10">
+        <div className="flex items-center justify-center mb-6 sm:mb-10 relative z-10">
           <FamilyNode
             member={member}
             spouse={spouse}
@@ -141,7 +154,6 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
             onDelete={onDeleteMember}
             onAddChild={onAddChild}
             onAddSpouse={onAddSpouse}
-            isPresentationMode={false}
           />
         </div>
 
@@ -149,22 +161,22 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
         {directChildren.length > 0 && (
           <div className="flex flex-col items-center w-full relative">
             {/* خط الاتصال العمودي من الوالدين */}
-            <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-0.5 h-6 sm:h-12 bg-gray-400 z-0"></div>
+            <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-0.5 h-8 sm:h-16 bg-gray-400 z-0"></div>
             
             {/* خط أفقي يربط جميع الأطفال */}
             {directChildren.length > 1 && (
-              <div className="relative mt-6 sm:mt-12 mb-4 sm:mb-8">
+              <div className="relative mt-8 sm:mt-16 mb-6 sm:mb-10">
                 <div 
                   className="absolute top-0 h-0.5 bg-gray-400 z-0"
                   style={{ 
                     left: '50%',
                     transform: 'translateX(-50%)',
-                    width: `${(directChildren.length - 1) * (window.innerWidth < 640 ? 200 : 350)}px`
+                    width: `${(directChildren.length - 1) * (window.innerWidth < 640 ? 250 : 400)}px`
                   }}
                 ></div>
                 
                 {directChildren.map((_, index) => {
-                  const spacing = window.innerWidth < 640 ? 200 : 350;
+                  const spacing = window.innerWidth < 640 ? 250 : 400;
                   const totalWidth = (directChildren.length - 1) * spacing;
                   const startX = -totalWidth / 2;
                   const childX = startX + (index * spacing);
@@ -172,7 +184,7 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
                   return (
                     <div
                       key={index}
-                      className="absolute w-0.5 h-4 sm:h-8 bg-gray-400 top-0 z-0"
+                      className="absolute w-0.5 h-6 sm:h-10 bg-gray-400 top-0 z-0"
                       style={{ 
                         left: '50%',
                         transform: `translateX(${childX}px)`
@@ -185,15 +197,15 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
             
             {/* خط عمودي واحد للطفل الوحيد */}
             {directChildren.length === 1 && (
-              <div className="absolute top-6 sm:top-12 left-1/2 transform -translate-x-1/2 w-0.5 h-4 sm:h-8 bg-gray-400 z-0"></div>
+              <div className="absolute top-8 sm:top-16 left-1/2 transform -translate-x-1/2 w-0.5 h-6 sm:h-10 bg-gray-400 z-0"></div>
             )}
             
             {/* عرض جميع الأطفال في صف واحد */}
             <div 
               className="flex items-start justify-center relative z-10 flex-wrap sm:flex-nowrap"
               style={{ 
-                gap: window.innerWidth < 640 ? '50px' : '100px',
-                marginTop: directChildren.length > 1 ? (window.innerWidth < 640 ? '40px' : '80px') : (window.innerWidth < 640 ? '40px' : '80px')
+                gap: window.innerWidth < 640 ? '80px' : '150px',
+                marginTop: directChildren.length > 1 ? (window.innerWidth < 640 ? '60px' : '100px') : (window.innerWidth < 640 ? '60px' : '100px')
               }}
             >
               {directChildren.map((child) => (
@@ -212,31 +224,31 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
     if (presentationPath.length === 0) return null;
 
     return (
-      <div className="flex flex-col items-center justify-start min-h-full p-6 sm:p-12">
+      <div className="flex flex-col items-center justify-start min-h-full p-4 sm:p-8">
         {/* شريط التنقل */}
-        <div className="w-full max-w-5xl mb-12">
-          <div className="flex items-center justify-between bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-            <div className="flex items-center gap-4">
+        <div className="w-full max-w-4xl mb-6 sm:mb-8">
+          <div className="flex items-center justify-between bg-white rounded-xl shadow-sm border border-gray-200 p-3 sm:p-4">
+            <div className="flex items-center gap-2 sm:gap-3">
               {presentationPath.length > 1 && (
                 <button
                   onClick={goBackInPresentation}
-                  className="p-3 hover:bg-gray-100 rounded-xl transition-all duration-300 hover:scale-105"
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   title="العودة للخلف"
                 >
-                  <ChevronLeft className="w-6 h-6 text-gray-600" />
+                  <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" />
                 </button>
               )}
               <button
                 onClick={goToRootInPresentation}
-                className="p-3 hover:bg-gray-100 rounded-xl transition-all duration-300 hover:scale-105"
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                 title="العودة للجد الأكبر"
               >
-                <Home className="w-6 h-6 text-gray-600" />
+                <Home className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" />
               </button>
             </div>
             
             <div className="text-center flex-1">
-              <h2 className="text-2xl font-bold text-gray-900 mb-1">
+              <h2 className="text-lg sm:text-xl font-bold text-gray-900">
                 عرض تقديمي للعائلة
               </h2>
               <p className="text-sm text-gray-500">
@@ -246,16 +258,17 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
             
             <button
               onClick={togglePresentationMode}
-              className="btn-secondary text-sm px-6 py-3"
+              className="btn-secondary text-sm"
             >
-              <Grid3X3 className="w-5 h-5" />
+              <Grid3X3 className="w-4 h-4" />
               عرض الشجرة
             </button>
           </div>
         </div>
 
         {/* عرض المسار العمودي */}
-        <div className="w-full max-w-4xl space-y-16">
+        <div className="w-full max-w-2xl space-y-6">
+          {/* عرض المسار الكامل */}
           {presentationPath.map((memberId, index) => {
             const member = members.find(m => m.id === memberId);
             if (!member) return null;
@@ -265,63 +278,53 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
             const isLastInPath = index === presentationPath.length - 1;
 
             return (
-              <div key={`${memberId}-${index}`} className="relative">
+              <div key={`path-${memberId}-${index}`} className="relative">
                 {/* العضو الحالي */}
-                <div className="flex justify-center mb-12">
-                  <div className={`transform transition-all duration-700 ${
-                    isLastInPath ? 'scale-110 shadow-2xl' : 'scale-100 opacity-75'
+                <div className="flex justify-center mb-4">
+                  <div className={`transform transition-all duration-300 ${
+                    isLastInPath ? 'scale-110' : 'scale-100 opacity-75'
                   }`}>
-                    <div 
-                      className={`${isLastInPath && children.length > 0 ? 'cursor-pointer ring-4 ring-primary-200 rounded-2xl p-2 hover:ring-primary-400 transition-all duration-300' : ''}`}
-                      onClick={() => children.length > 0 && handlePresentationMemberClick(member)}
-                    >
-                      <FamilyNode
-                        member={member}
-                        spouse={spouse}
-                        isSelected={selectedMember?.id === member.id || selectedMember?.id === spouse?.id}
-                        onSelect={onSelectMember}
-                        onEdit={onEditMember}
-                        onDelete={onDeleteMember}
-                        onAddChild={onAddChild}
-                        onAddSpouse={onAddSpouse}
-                        isPresentationMode={true}
-                      />
-                    </div>
+                    <FamilyNode
+                      member={member}
+                      spouse={spouse}
+                      isSelected={selectedMember?.id === member.id || selectedMember?.id === spouse?.id}
+                      onSelect={handlePresentationMemberClick}
+                      onEdit={onEditMember}
+                      onDelete={onDeleteMember}
+                      onAddChild={onAddChild}
+                      onAddSpouse={onAddSpouse}
+                    />
                   </div>
                 </div>
 
-                {/* خط الاتصال العمودي المتحرك - يظهر فقط إذا كان هناك أطفال وتم الضغط */}
-                {children.length > 0 && isLastInPath && showingChildren.some(childId => children.find(c => c.id === childId)) && (
-                  <div className="flex justify-center mb-12">
-                    <div className="w-2 h-16 bg-gradient-to-b from-primary-400 to-primary-600 rounded-full animate-pulse shadow-lg"></div>
+                {/* خط الاتصال العمودي - يظهر إذا لم يكن آخر عضو في المسار أو إذا كان له أطفال */}
+                {(!isLastInPath || children.length > 0) && (
+                  <div className="flex justify-center mb-4">
+                    <div className={`w-0.5 h-8 ${isLastInPath ? 'bg-primary-400' : 'bg-gray-400'}`}></div>
                   </div>
                 )}
 
-                {/* الأطفال - يظهرون فقط للعضو الأخير في المسار وبعد الضغط */}
-                {children.length > 0 && isLastInPath && showingChildren.some(childId => children.find(c => c.id === childId)) && (
-                  <div className="space-y-8">
+                {/* الأطفال - يظهرون فقط للعضو الأخير في المسار */}
+                {children.length > 0 && isLastInPath && (
+                  <div className="space-y-3">
                     <div className="text-center">
-                      <div className="inline-block bg-gradient-to-r from-primary-500 to-primary-600 text-white px-8 py-4 rounded-2xl shadow-lg">
-                        <h3 className="text-xl font-bold mb-1">الأطفال</h3>
-                        <p className="text-primary-100 text-sm">({children.length} أطفال)</p>
-                      </div>
+                      <h3 className="text-lg font-semibold text-gray-800 mb-3">الأطفال</h3>
                     </div>
                     
-                    {/* خط أفقي متحرك يربط الأطفال */}
+                    {/* خط أفقي يربط الأطفال */}
                     {children.length > 1 && (
-                      <div className="relative flex justify-center mb-12">
+                      <div className="relative flex justify-center mb-4">
                         <div 
-                          className="h-2 bg-gradient-to-r from-primary-400 via-primary-600 to-primary-400 rounded-full shadow-lg animate-line-draw"
-                          style={{ width: `${Math.min(children.length * 180, 720)}px` }}
+                          className="h-0.5 bg-primary-400"
+                          style={{ width: `${Math.min(children.length * 120, 600)}px` }}
                         ></div>
                         {children.map((_, childIndex) => (
                           <div
                             key={childIndex}
-                            className="absolute w-2 h-8 bg-primary-500 top-0 rounded-full shadow-md animate-bounce-in"
+                            className="absolute w-0.5 h-4 bg-primary-400 top-0"
                             style={{ 
                               left: `${(childIndex / (children.length - 1)) * 100}%`,
-                              transform: 'translateX(-50%)',
-                              animationDelay: `${childIndex * 150}ms`
+                              transform: 'translateX(-50%)'
                             }}
                           ></div>
                         ))}
@@ -330,62 +333,39 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
 
                     {/* خط عمودي للطفل الوحيد */}
                     {children.length === 1 && (
-                      <div className="flex justify-center mb-8">
-                        <div className="w-2 h-8 bg-primary-500 rounded-full shadow-lg animate-bounce-in"></div>
+                      <div className="flex justify-center mb-4">
+                        <div className="w-0.5 h-4 bg-primary-400"></div>
                       </div>
                     )}
                     
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto">
-                      {children.map((child, childIndex) => {
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                      {children.map((child) => {
                         const childSpouse = child.spouseId ? members.find(m => m.id === child.spouseId) : null;
                         const hasGrandchildren = members.some(m => m.parentId === child.id);
-                        const isAnimating = animatingChildren.includes(child.id);
                         
                         return (
                           <div 
                             key={child.id} 
-                            className={`transform transition-all duration-800 ${
-                              isAnimating 
-                                ? 'animate-bounce-in opacity-100 scale-100' 
-                                : 'opacity-100 scale-100'
-                            } ${
-                              hasGrandchildren ? 'cursor-pointer hover:scale-105 hover:rotate-1' : ''
+                            className={`transform hover:scale-105 transition-all duration-200 ${
+                              hasGrandchildren ? 'cursor-pointer ring-2 ring-primary-200 rounded-lg' : ''
                             }`}
-                            style={{
-                              animationDelay: `${childIndex * 150}ms`
-                            }}
-                            onClick={() => hasGrandchildren && handlePresentationMemberClick(child)}
+                            onClick={() => handlePresentationMemberClick(child)}
                           >
-                            <div className={`relative ${
-                              hasGrandchildren 
-                                ? 'ring-2 ring-primary-200 hover:ring-primary-400 rounded-2xl p-3 transition-all duration-500 hover:shadow-xl' 
-                                : 'hover:shadow-lg transition-shadow duration-300'
-                            }`}>
-                              {/* تأثير الإضاءة للكاردات التفاعلية */}
-                              {hasGrandchildren && (
-                                <div className="absolute inset-0 bg-gradient-to-r from-primary-50 to-transparent rounded-2xl opacity-0 hover:opacity-100 transition-opacity duration-500"></div>
-                              )}
-                              
-                              <div className="relative z-10">
-                                <FamilyNode
-                                  member={child}
-                                  spouse={childSpouse}
-                                  isSelected={selectedMember?.id === child.id || selectedMember?.id === childSpouse?.id}
-                                  onSelect={onSelectMember}
-                                  onEdit={onEditMember}
-                                  onDelete={onDeleteMember}
-                                  onAddChild={onAddChild}
-                                  onAddSpouse={onAddSpouse}
-                                  isPresentationMode={true}
-                                />
-                              </div>
-                            </div>
-                            
+                            <FamilyNode
+                              member={child}
+                              spouse={childSpouse}
+                              isSelected={selectedMember?.id === child.id || selectedMember?.id === childSpouse?.id}
+                              onSelect={handlePresentationMemberClick}
+                              onEdit={onEditMember}
+                              onDelete={onDeleteMember}
+                              onAddChild={onAddChild}
+                              onAddSpouse={onAddSpouse}
+                            />
                             {hasGrandchildren && (
-                              <div className="text-center mt-4">
-                                <div className="inline-block bg-gradient-to-r from-primary-500 to-primary-600 text-white px-4 py-2 rounded-full text-sm font-medium shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105">
-                                  <span>اضغط لرؤية الأطفال ✨</span>
-                                </div>
+                              <div className="text-center mt-1">
+                                <span className="text-xs bg-primary-100 text-primary-700 px-2 py-1 rounded-full">
+                                  اضغط لرؤية الأطفال
+                                </span>
                               </div>
                             )}
                           </div>
@@ -397,27 +377,15 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
 
                 {/* رسالة عدم وجود أطفال */}
                 {children.length === 0 && isLastInPath && (
-                  <div className="text-center py-16">
-                    <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-3xl p-8 max-w-md mx-auto shadow-lg">
-                      <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <Plus className="w-8 h-8 text-gray-400" />
-                      </div>
-                      <p className="text-gray-600 text-lg mb-6 font-medium">لا يوجد أطفال لهذا العضو</p>
-                      <button
-                        onClick={() => onAddChild(member.id)}
-                        className="btn-primary text-base px-6 py-3 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105"
-                      >
-                        <Plus className="w-5 h-5" />
-                        إضافة طفل جديد
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* خط الاتصال للعضو التالي في المسار */}
-                {index < presentationPath.length - 1 && (
-                  <div className="flex justify-center py-12">
-                    <div className="w-1 h-16 bg-gradient-to-b from-gray-300 to-gray-400 rounded-full shadow-sm"></div>
+                  <div className="text-center py-6">
+                    <p className="text-gray-500 text-lg mb-4">لا يوجد أطفال لهذا العضو</p>
+                    <button
+                      onClick={() => onAddChild(member.id)}
+                      className="btn-primary"
+                    >
+                      <Plus className="w-4 h-4" />
+                      إضافة طفل
+                    </button>
                   </div>
                 )}
               </div>
@@ -432,7 +400,7 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
     return (
       <div className="flex-1 flex items-center justify-center p-4 relative">
         {/* رسالة الترحيب - تظهر في الشاشات الكبيرة فقط */}
-        <div className="text-center max-w-sm lg:block">
+        <div className="text-center max-w-sm hidden lg:block">
           <div className="w-16 h-16 sm:w-24 sm:h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg className="w-8 h-8 sm:w-12 sm:h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
@@ -441,7 +409,7 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
           <h3 className="text-lg font-medium text-gray-900 mb-2">ابدأ ببناء شجرة عائلتك</h3>
           <p className="text-gray-500 mb-4 text-sm">أضف أول عضو في العائلة لبدء بناء الشجرة</p>
           <div className="flex justify-center gap-2">
-            <button 
+            <button
               onClick={onAddMember}
               className="btn-primary"
             >
@@ -462,10 +430,10 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
         <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-2 sm:p-3">
           <button
             onClick={togglePresentationMode}
-            className={`p-2 sm:p-3 rounded-lg transition-all duration-300 group w-full ${
+            className={`p-2 sm:p-3 rounded-lg transition-colors group w-full ${
               isPresentationMode 
-                ? 'bg-primary-100 text-primary-600 scale-110' 
-                : 'hover:bg-gray-100 text-gray-600 hover:scale-105'
+                ? 'bg-primary-100 text-primary-600' 
+                : 'hover:bg-gray-100 text-gray-600'
             }`}
             title={isPresentationMode ? 'عرض الشجرة الكاملة' : 'وضع العرض التقديمي'}
           >
@@ -479,7 +447,18 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
 
         {/* أدوات التحكم في التكبير - تظهر فقط في الوضع العادي */}
         {!isPresentationMode && (
-          <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-2 sm:p-3 flex flex-col gap-1 sm:gap-2 zoom-controls">
+          <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-2 sm:p-3 flex flex-col gap-1 sm:gap-2 zoom-controls mb-3">
+            <button
+              onClick={toggleGrid}
+              className={`p-2 sm:p-3 rounded-lg transition-colors group ${
+                showGrid 
+                  ? 'bg-primary-100 text-primary-600' 
+                  : 'hover:bg-gray-100 text-gray-600'
+              }`}
+              title={showGrid ? 'إخفاء الشبكة' : 'إظهار الشبكة'}
+            >
+              <Grid3X3 className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
             <button
               onClick={handleZoomIn}
               className="p-2 sm:p-3 hover:bg-gray-100 rounded-lg transition-colors group"
@@ -499,10 +478,15 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
             <button
               onClick={handleResetZoom}
               className="p-2 sm:p-3 hover:bg-gray-100 rounded-lg transition-colors group"
-              title="إعادة تعيين"
+              title="إعادة تعيين الموضع والتكبير"
             >
               <RotateCcw className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600 group-hover:text-primary-600" />
             </button>
+            <div className="border-t border-gray-200 my-1"></div>
+            <div className="p-1 text-center">
+              <Move className="w-3 h-3 text-gray-400 mx-auto mb-1" />
+              <span className="text-xs text-gray-500">اسحب للتحريك</span>
+            </div>
             <div className="text-xs text-gray-500 text-center px-1 sm:px-2 py-1 bg-gray-50 rounded font-medium">
               {Math.round(zoom * 100)}%
             </div>
@@ -513,21 +497,49 @@ const FamilyTreeView: React.FC<FamilyTreeViewProps> = ({
       {/* منطقة عرض المحتوى */}
       <div 
         ref={containerRef}
-        className="w-full h-full overflow-auto bg-gray-50"
+        className={`w-full h-full overflow-hidden relative ${
+          isDragging ? 'cursor-grabbing' : 'cursor-grab'
+        }`}
         id="family-tree-container"
-        style={{ padding: isPresentationMode ? '0' : (window.innerWidth < 640 ? '20px' : '60px') }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
       >
-        {isPresentationMode ? (
-          renderPresentationView()
-        ) : (
+        {/* خلفية الشبكة */}
+        {showGrid && !isPresentationMode && (
           <div 
-            className="min-w-max flex justify-center transition-transform duration-300 ease-in-out"
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              backgroundImage: `
+                linear-gradient(rgba(0,0,0,0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,0,0,0.1) 1px, transparent 1px)
+              `,
+              backgroundSize: `${20 * zoom}px ${20 * zoom}px`,
+              backgroundPosition: `${panOffset.x}px ${panOffset.y}px`,
+              opacity: 0.3
+            }}
+          />
+        )}
+        
+        {/* المحتوى */}
+        {isPresentationMode ? (
+          <div className="w-full h-full overflow-auto bg-gray-50 p-4 sm:p-8">
+            {renderPresentationView()}
+          </div>
+        ) : (
+          <div
+            className="absolute inset-0 flex items-center justify-center"
             style={{ 
-              transform: `scale(${zoom})`,
-              transformOrigin: 'center top'
+              transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
+              transformOrigin: 'center center',
+              transition: isDragging ? 'none' : 'transform 0.1s ease-out'
             }}
           >
-            {buildTree(rootMemberId)}
+            <div className="min-w-max">
+              {buildTree(rootMemberId)}
+            </div>
           </div>
         )}
       </div>

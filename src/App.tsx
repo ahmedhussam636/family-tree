@@ -21,6 +21,7 @@ function App() {
     updateMember,
     deleteMember,
     addSpouse,
+    clearData,
   } = useFamilyTree();
 
   const { toasts, removeToast, showSuccess, showError } = useToast();
@@ -34,10 +35,12 @@ function App() {
     isOpen: boolean;
     memberId: string;
     memberName: string;
+    isFullClear?: boolean;
   }>({
     isOpen: false,
     memberId: '',
-    memberName: ''
+    memberName: '',
+    isFullClear: false
   });
 
   const handleAddMember = (parentId?: string) => {
@@ -213,22 +216,37 @@ function App() {
     setDeleteConfirm({
       isOpen: true,
       memberId: id,
-      memberName
+      memberName,
+      isFullClear: false
+    });
+  };
+
+  const handleClearData = () => {
+    setDeleteConfirm({
+      isOpen: true,
+      memberId: '',
+      memberName: '',
+      isFullClear: true
     });
   };
 
   const confirmDelete = () => {
     try {
-      deleteMember(deleteConfirm.memberId);
-      showSuccess(`تم حذف ${deleteConfirm.memberName} بنجاح`);
+      if (deleteConfirm.isFullClear) {
+        clearData();
+        showSuccess('تم مسح جميع البيانات بنجاح');
+      } else {
+        deleteMember(deleteConfirm.memberId);
+        showSuccess(`تم حذف ${deleteConfirm.memberName} بنجاح`);
+      }
     } catch (error) {
-      showError('حدث خطأ أثناء حذف العضو');
+      showError(deleteConfirm.isFullClear ? 'حدث خطأ أثناء مسح البيانات' : 'حدث خطأ أثناء حذف العضو');
     }
-    setDeleteConfirm({ isOpen: false, memberId: '', memberName: '' });
+    setDeleteConfirm({ isOpen: false, memberId: '', memberName: '', isFullClear: false });
   };
 
   const cancelDelete = () => {
-    setDeleteConfirm({ isOpen: false, memberId: '', memberName: '' });
+    setDeleteConfirm({ isOpen: false, memberId: '', memberName: '', isFullClear: false });
   };
 
   const handleAddSpouse = (memberId: string) => {
@@ -245,6 +263,7 @@ function App() {
         familyTreeName={familyTree.name}
         membersCount={familyTree.members.length}
         onExport={handleExportToPDF}
+        onClearData={handleClearData}
       />
       
       <div className="flex flex-1 overflow-hidden relative">
@@ -323,9 +342,13 @@ function App() {
       {/* Confirm Delete Dialog */}
       {deleteConfirm.isOpen && (
         <ConfirmDialog
-          title="تأكيد الحذف"
-          message={`هل أنت متأكد من حذف ${deleteConfirm.memberName}؟ سيتم حذف جميع الأطفال المرتبطين به أيضاً.`}
-          confirmText="حذف"
+          title={deleteConfirm.isFullClear ? "تأكيد مسح البيانات" : "تأكيد الحذف"}
+          message={
+            deleteConfirm.isFullClear 
+              ? "هل أنت متأكد من مسح جميع بيانات شجرة العائلة؟ لا يمكن التراجع عن هذا الإجراء."
+              : `هل أنت متأكد من حذف ${deleteConfirm.memberName}؟ سيتم حذف جميع الأطفال المرتبطين به أيضاً.`
+          }
+          confirmText={deleteConfirm.isFullClear ? "مسح جميع البيانات" : "حذف"}
           cancelText="إلغاء"
           onConfirm={confirmDelete}
           onCancel={cancelDelete}
